@@ -59,7 +59,6 @@ type SearchClient struct {
 
 // FindUsers отправляет запрос во внешнюю систему, которая непосредственно ищет пользоваталей
 func (srv *SearchClient) FindUsers(req SearchRequest) (*SearchResponse, error) {
-
 	searcherParams := url.Values{}
 
 	if req.Limit < 0 {
