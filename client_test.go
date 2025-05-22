@@ -1,13 +1,34 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
+type TestCase struct {
+	name     string
+	request  SearchRequest
+	response SearchResponse
+	err      error
+}
+
 func TestQwe(t *testing.T) {
+	cases := []TestCase{
+		{
+			"deda",
+			SearchRequest{
+				Limit:      0,
+				Offset:     0,
+				Query:      "irure",
+				OrderField: "",
+				OrderBy:    0,
+			},
+			SearchResponse{},
+			nil,
+		},
+	}
+
 	ts := httptest.NewServer(http.HandlerFunc(SearchServer))
 	defer ts.Close()
 
@@ -16,15 +37,18 @@ func TestQwe(t *testing.T) {
 		URL:         ts.URL,
 	}
 
-	sr := SearchRequest{
-		Limit:      0,
-		Offset:     0,
-		Query:      "irure",
-		OrderField: "",
-		OrderBy:    0,
-	}
+	for _, item := range cases {
+		t.Run(item.name, func(t *testing.T) {
+			res, err := sc.FindUsers(item.request)
 
-	srq, err := sc.FindUsers(sr)
-	fmt.Println(err)
-	fmt.Println(srq)
+			if item.err != err {
+				t.Errorf("Expected %v, got %v", item.err, err)
+			}
+
+			if item.response.NextPage != res.NextPage {
+				t.Errorf("Expected %v, got %v", item.response.NextPage, res.NextPage)
+			}
+			// ...
+		})
+	}
 }
