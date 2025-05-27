@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -31,6 +32,12 @@ type XMLUsers struct {
 func SearchServer(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	if r.Header.Get("AccessToken") != GetAccessToken() {
+		log.Println("Access Token Not Authorized")
+		http.Error(w, "access token not authorized", http.StatusUnauthorized)
+		return
+	}
+
 	file, err := os.ReadFile("dataset.xml")
 	if err != nil {
 		log.Printf("error reading xml file: %s", err)
@@ -38,77 +45,104 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var users XMLUsers
-	err = xml.Unmarshal(file, &users)
+	var xmlUsers XMLUsers
+	err = xml.Unmarshal(file, &xmlUsers)
 	if err != nil {
 		log.Printf("error xml unmarshal: %s", err)
+		http.Error(w, "error1234", http.StatusInternalServerError)
 		return
 	}
 
-	values := r.URL.Query()
-	query := values.Get("query")
-	clientUsers := f(&users, query)
-
-	orderField, err := parseOrderField(values.Get("order_field"))
+	searchRequest, err := parseURLValues(r.URL.Query())
 	if err != nil {
-		log.Printf("%s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("error parsing url values: %s", err)
+		http.Error(w, "error1234", http.StatusInternalServerError)
 		return
 	}
 
-	orderBy, err := parseOrderBy(values.Get("order_by"))
-	if err != nil {
-		log.Printf("%s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	users := transformAndFilterUsers(&xmlUsers, searchRequest.Query)
+
+	sortUsers(users, searchRequest.OrderField, searchRequest.OrderBy)
+	users = paginateUsers(users, searchRequest.Offset, searchRequest.Limit)
+
+	if err := json.NewEncoder(w).Encode(users); err != nil {
+		log.Printf("error writing response: %s", err)
+		http.Error(w, fmt.Sprintf("error encoding json: %v", err), http.StatusInternalServerError)
 	}
-
-	sortUsers(clientUsers, orderField, orderBy)
-
-	offset, err := parseOffset(values.Get("offset"))
-	if err != nil {
-		log.Printf("%s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	limit, err := parseLimit(values.Get("limit"))
-	if err != nil {
-		log.Printf("%s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response, err := json.Marshal(clientUsers[offset : offset+limit])
-	if err != nil {
-		log.Println("error json marshal: %w")
-	}
-
-	w.Write(response)
-
-	// if err := json.NewEncoder(w).Encode(searchResponse.Users); err != nil {
-	// 	http.Error(w, fmt.Sprintf("error encoding json: %v", err), http.StatusInternalServerError)
-	// }
 }
 
-func f(users *XMLUsers, query string) []User {
+func GetAccessToken() string {
+	return "token"
+}
+
+func transformAndFilterUsers(users *XMLUsers, query string) []User {
 	response := make([]User, 0)
 
-	for _, user := range users.Rows {
-		if strings.Contains(user.FirstName, query) ||
-			strings.Contains(user.LastName, query) ||
-			strings.Contains(user.About, query) {
+	for _, xmlUser := range users.Rows {
+		if matchesQuery(xmlUser, query) {
 			response = append(response, User{
-				user.Id,
-				user.FirstName + user.LastName,
-				user.Age,
-				user.About,
-				"",
+				Id:     xmlUser.Id,
+				Name:   xmlUser.FirstName + xmlUser.LastName,
+				Age:    xmlUser.Age,
+				About:  xmlUser.About,
+				Gender: "",
 			})
 		}
 	}
 
 	return response
+}
+
+func matchesQuery(user xmlUser, query string) bool {
+	return strings.Contains(user.FirstName, query) ||
+		strings.Contains(user.LastName, query) ||
+		strings.Contains(user.About, query)
+}
+
+func paginateUsers(users []User, offset int, limit int) []User {
+	if offset >= len(users) {
+		return []User{}
+	}
+
+	start := offset
+	end := offset + limit
+	if end > len(users) {
+		end = len(users)
+	}
+
+	return users[start:end]
+}
+
+func parseURLValues(values url.Values) (SearchRequest, error) {
+	query := values.Get("query")
+
+	orderField, err := parseOrderField(values.Get("order_field"))
+	if err != nil {
+		return SearchRequest{}, fmt.Errorf("error parsing order_field: %w", err)
+	}
+
+	orderBy, err := parseOrderBy(values.Get("order_by"))
+	if err != nil {
+		return SearchRequest{}, fmt.Errorf("error parsing order_by: %w", err)
+	}
+
+	offset, err := parseOffset(values.Get("offset"))
+	if err != nil {
+		return SearchRequest{}, fmt.Errorf("error parsing offset: %w", err)
+	}
+
+	limit, err := parseLimit(values.Get("limit"))
+	if err != nil {
+		return SearchRequest{}, fmt.Errorf("error parsing limit: %w", err)
+	}
+
+	return SearchRequest{
+		Query:      query,
+		OrderField: orderField,
+		OrderBy:    orderBy,
+		Offset:     offset,
+		Limit:      limit,
+	}, nil
 }
 
 func parseOrderField(orderField string) (string, error) {
@@ -161,35 +195,29 @@ func sortUsers(users []User, orderField string, orderBy int) {
 	}
 
 	switch orderField {
-	case "id":
+	case Id:
 		sort.Slice(users, func(i, j int) bool {
 			if orderBy == OrderByAsc {
-				return users[i].Id < users[j].Id
-			} else if orderBy == OrderByDesc {
-				return users[i].Id > users[j].Id
+				i, j = j, i
 			}
 
-			return false
+			return users[i].Id > users[j].Id
 		})
-	case "name":
+	case Name:
 		sort.Slice(users, func(i, j int) bool {
 			if orderBy == OrderByAsc {
-				return users[i].Name < users[j].Name
-			} else if orderBy == OrderByDesc {
-				return users[i].Name > users[j].Name
+				i, j = j, i
 			}
 
-			return false
+			return users[i].Name > users[j].Name
 		})
-	case "age":
+	case Age:
 		sort.Slice(users, func(i, j int) bool {
 			if orderBy == OrderByAsc {
-				return users[i].Age < users[j].Age
-			} else if orderBy == OrderByDesc {
-				return users[i].Age > users[j].Age
+				i, j = j, i
 			}
 
-			return false
+			return users[i].Age > users[j].Age
 		})
 	}
 }
