@@ -29,16 +29,18 @@ type XMLUsers struct {
 	Rows []xmlUser `xml:"row"`
 }
 
+var filepath = "dataset.xml"
+
 func SearchServer(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	if r.Header.Get("AccessToken") != GetAccessToken() {
+	if r.Header.Get("AccessToken") != getAccessToken() {
 		log.Println("Access Token Not Authorized")
 		http.Error(w, "access token not authorized", http.StatusUnauthorized)
 		return
 	}
 
-	file, err := os.ReadFile("dataset.xml")
+	file, err := os.ReadFile(filepath)
 	if err != nil {
 		log.Printf("error reading xml file: %s", err)
 		http.Error(w, "error1234", http.StatusInternalServerError)
@@ -56,7 +58,7 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 	searchRequest, err := parseURLValues(r.URL.Query())
 	if err != nil {
 		log.Printf("error parsing url values: %s", err)
-		http.Error(w, "error1234", http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err), http.StatusBadRequest)
 		return
 	}
 
@@ -71,8 +73,8 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func GetAccessToken() string {
-	return "token"
+func getAccessToken() string {
+	return ""
 }
 
 func transformAndFilterUsers(users *XMLUsers, query string) []User {
@@ -118,7 +120,8 @@ func parseURLValues(values url.Values) (SearchRequest, error) {
 
 	orderField, err := parseOrderField(values.Get("order_field"))
 	if err != nil {
-		return SearchRequest{}, fmt.Errorf("error parsing order_field: %w", err)
+		//return SearchRequest{}, fmt.Errorf("error parsing order_field: %w", err)
+		return SearchRequest{}, fmt.Errorf("ErrorBadOrderField")
 	}
 
 	orderBy, err := parseOrderBy(values.Get("order_by"))
